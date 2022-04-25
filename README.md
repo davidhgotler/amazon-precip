@@ -7,7 +7,8 @@ This project is focused on predicting precipitation in the Amazon region, using 
 - Geopotential at 200 hPa
 - Relative Humidity at 1000 hPa
 
-To download data run the cdsapi_request.py file. Then, run combine_features.py to make a single features dataset file.
+To download data run the cdsapi_request.py file. Then, run combine_features.py to make a single features dataset file. Or download from the climate data store https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-pressure-levels-monthly-means?tab=overview
+https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels-monthly-means?tab=overview.
 ### target/predictand: GPCC Monthly Precipitation 1x1 v2020
 - precip
 
