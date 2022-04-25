@@ -1,6 +1,6 @@
-# amazon-precip
+# Predicting Rainfall in the Amazon Using Statistical Forecast
 This project is focused on predicting precipitation in the Amazon region, using machine learning techniques. Code is written in python, built on xarray and sci-kit learn libraries.
-## data
+## Data
 ### features/predictors: ERA5 Monthly Reanalysis
 - Convective Available Potential Energy
 - Convective Inhibition
