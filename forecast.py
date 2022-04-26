@@ -3,6 +3,7 @@ import logging
 import numpy as np
 import pandas as pd
 import xarray as xr
+import hvplot.xarray
 
 from matplotlib import pyplot as plt
 
@@ -309,15 +310,45 @@ class DirectForecaster(ForecasterBase):
 
     def data_plots(
         self,
-        y_true,
-        y_pred,
+        y_true:xr.DataArray,
+        y_pred:xr.DataArray,
+        plot_facet:bool=True,
+        plot_timeseries:bool=False,
+        plot_corr_map:bool=False,
+        plot_error:bool=False,
     ):
-        pass
-    def eof_plots(self,eofs:Eof,n:int,plot_var:bool=True,plot_1st_pc:bool=True,plot_1st_eof:bool=True):
+        '''
+        Plotting function for comparing true field values to predicted
+
+        Parameters
+        ----------
+        `y_true` : DataArray containing true values
+        `y_pred` : DataArray contatining predicted values
+        `plot_facet` : If true - facet plot of the grid data
+        `plot_timeseries` : If true - plot an avg timeseries using cos(lat) weights
+        `plot_error` : If true - plot the error
+        `plot_corr_map` : If true - plot a correlation map of the region
+        '''
+        plots = {}
+        if plot_facet:
+            p_true = y_true.hvplot(x='lon',y='lat',col='time').cols(self.steps)
+            p_pred = y_pred.hvplot(x='lon',y='lat',col='time').cols(self.steps)
+            plots['facet'] = p_true+p_pred
+        
+        
+
+    def eof_plots(
+        self,
+        eofs:Eof,
+        n:int,
+        plot_var:bool=True,
+        plot_1st_pc:bool=True,
+        plot_1st_eof:bool=True,
+    ):
         '''
         Plot eof/pc analysis information
         '''
-        pass
+        
 
 
 class RecursiveForecaster(ForecasterBase):
