@@ -155,7 +155,15 @@ class DirectForecaster(ForecasterBase):
         `train_data` : Dataset(s) for the training set years: X_train,y_train
         `test_data` : Dataset(s) for the test set years: X_test,y_test
         '''
-
+        if isinstance(test_yrs,np.ndarray):
+            self.test_yrs = test_yrs
+        elif isinstance(test_yrs,int):
+            test_yrs = autoreg['time.year'].values[-1]-np.arange(test_yrs)
+            self.test_yrs = test_yrs
+        else:
+            test_yrs = np.array(test_yrs)
+            self.test_yrs = test_yrs
+        
         # Select target months
         y = self.sel_months(autoreg,self.target_months)
 
@@ -174,10 +182,22 @@ class DirectForecaster(ForecasterBase):
             X = self.sel_months(exog,feature_months)
 
         # Split into training and test sets
-        X_train = X.drop_sel(time=X['time'][X['time.year'].isin(test_yrs)])
-        y_train = y.drop_sel(time=y['time'][y['time.year'].isin(test_yrs)])
-        X_test = X.sel(time=X['time.year'].isin(test_yrs))
-        y_test = y.sel(time=y['time.year'].isin(test_yrs))
+        # ---------------------------------
+
+        # Check if January is a target month to include correct lag years in features
+        if np.isin(12,self.target_months):
+            test_yrs_ft = np.concatenate(self.test_yrs,self.test_yrs.min()-1)
+
+            X_train = X.drop_sel(time=X['time'][X['time.year'].isin(test_yrs_ft)])
+            y_train = y.drop_sel(time=y['time'][y['time.year'].isin(test_yrs)])
+            X_test = X.sel(time=X['time.year'].isin(test_yrs_ft))
+            y_test = y.sel(time=y['time.year'].isin(test_yrs))
+        # Otherwise split normally
+        else:
+            X_train = X.drop_sel(time=X['time'][X['time.year'].isin(test_yrs)])
+            y_train = y.drop_sel(time=y['time'][y['time.year'].isin(test_yrs)])
+            X_test = X.sel(time=X['time.year'].isin(test_yrs))
+            y_test = y.sel(time=y['time.year'].isin(test_yrs))
         return X_train,y_train,X_test,y_test
 
     def get_training_matrix(
@@ -237,7 +257,7 @@ class DirectForecaster(ForecasterBase):
             forecaster[m] = self.regressor.fit(X_m,y_m)
         self.forecaster = forecaster
         self.fitted = True
-        
+
     def predict(self, X: xr.DataArray, y: xr.DataArray) -> None:
         steps_arr = np.arange(len(self.target_months))%self.steps
         y_pred_list = []
@@ -261,19 +281,21 @@ class DirectForecaster(ForecasterBase):
         months:Union[list,np.ndarray],
     ):
         return X.sel(time=X['time.month'].isin(months))
-    
 
-
-    def eof_features(
+    def get_pcs(
         self,
         X:xr.DataArray,
         n:int=10,
+        name:str='features_eofs',
     ):
         '''
         Helper function to do eof analysis using eofs.xarray
         '''
         # Save eof object to access eof analysis data later
-        self.eofs = Eof(X,np.sqrt(np.abs(np.cos(np.deg2rad(X.lat.values)))))
+        if not hasattr(self,'eofs'):
+            self.eofs = {name:Eof(X,np.sqrt(np.abs(np.cos(np.deg2rad(X.lat.values)))))}
+        else:
+            self.eofs[name] = Eof(X,np.sqrt(np.abs(np.cos(np.deg2rad(X.lat.values)))))
         # Return reduced array with pc features
         return self.eofs.pcs(pcscaling=1,npcs=n)
     
@@ -301,3 +323,4 @@ class DirectForecaster(ForecasterBase):
 class RecursiveForecaster(ForecasterBase):
     def __init__(self) -> None:
         pass
+
