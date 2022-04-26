@@ -1,6 +1,10 @@
+import logging
+
 import numpy as np
 import pandas as pd
 import xarray as xr
+
+from matplotlib import pyplot as plt
 
 import sklearn as skl
 from sklearn.decomposition import PCA
@@ -134,9 +138,9 @@ class DirectForecaster(ForecasterBase):
     def train_test_split(
         self,
         test_yrs: Union[int, List[int],np.ndarray],
-        autoreg: xr.Dataset,
-        exog: xr.Dataset,
-    ) -> Tuple[xr.Dataset]:
+        autoreg: xr.DataArray,
+        exog: xr.DataArray,
+    ) -> Tuple[xr.DataArray]:
         '''
         Select,flatten and concatenate autoregressive and exogenous features then split into training, test datasets. For direct prediction feature months are fixed.
 
@@ -151,16 +155,10 @@ class DirectForecaster(ForecasterBase):
         `train_data` : Dataset(s) for the training set years: X_train,y_train
         `test_data` : Dataset(s) for the test set years: X_test,y_test
         '''
-        # def get_date(
-        #     year:int,
-        #     month:int,
-        # )->np.datetime64:
-        #     '''Helper function to get datetime indices from a year and month. Defaults to 1st day of the month'''
-        #     return np.datetime64('{}-{}-01'.format(year,month))
 
         # Select target months
         y = self.sel_months(autoreg,self.target_months)
-        # Select feature months
+
         # Select feature months for direct prediction on a range of (1,12)
         feature_months = np.arange(self.target_months.min()-self.lags,self.target_months.max()-self.steps+1)
         feature_months = np.where(feature_months>0,feature_months,feature_months+12)
@@ -168,7 +166,8 @@ class DirectForecaster(ForecasterBase):
         if self.include_autoreg and self.include_exog:
             X_autoreg = self.sel_months(autoreg,feature_months)
             X_exog = self.sel_months(exog,feature_months)
-            X = xr.concat([X_autoreg,X_exog],'feature').rename('Features')
+            X = xr.concat([X_autoreg,X_exog],'feature',coords='all').rename('Features')
+          
         elif self.include_autoreg:
             X = self.sel_months(autoreg,feature_months)
         elif self.include_exog:
@@ -225,7 +224,7 @@ class DirectForecaster(ForecasterBase):
                 X_m_pc = self.eof.pcs(pcscaling=1,npcs=10)
                 return X_m_pc,y_m
             else:
-                X_m_pc = self.eof.projectField(X_m,neofs=10,eofscaling=1,weighted=True)
+                X_m_pc = self.eof.projectField(X_m,neofs=10,eofscaling=1)
                 return X_m_pc,y_m
         else: 
             return X_m,y_m
@@ -245,7 +244,7 @@ class DirectForecaster(ForecasterBase):
         for m,s in zip(self.target_months,steps_arr):
             X_m,y_m = self.get_training_matrix(m,s,X,y)
             y_pred_list.append(xr.DataArray(self.forecaster[m].predict(X_m),coords=y_m.coords))
-        y_pred = xr.concat(y_pred_list,dim='time')
+        y_pred = xr.concat(y_pred_list,'time',coords='all')
         # y_pred = y_pred.swap_dims(sample='time').sortby('time')
         return y_pred
 
@@ -285,7 +284,7 @@ class DirectForecaster(ForecasterBase):
         params:dict,
     ):
         pass
-    
+
     def data_plots(
         self,
         y_true,

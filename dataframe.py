@@ -1,3 +1,4 @@
+from pyexpat import features
 import xarray as xr
 import numpy as np
 import pandas as pd
@@ -6,7 +7,7 @@ from typing import Union,Optional
 
 class dataframe():
 
-    def __init__(self,data_dir:str,features_fname:str,target_fname:str,features_range:tuple=(-30,0,-80,-40,1979,2019),target_range:tuple=(-20,-5,-70,-50,1979,2019)):
+    def __init__(self,data_dir:str,features_fname:str,target_fname:str,features_range:tuple=(-30,0,-80,-40,1950,2019),target_range:tuple=(-20,-5,-70,-50,1950,2019)):
         '''
         Initialization of dataframe object
 
@@ -57,8 +58,11 @@ class dataframe():
         self.target_da = self.target_ds.to_stacked_array('feature',['time'],name='Target').reset_index('feature')
     
     def remove_nan(self):
-        self.features_ds = self.features_ds.dropna('time','all').fillna(0)
-        self.target_ds = self.target_ds.dropna('time','all').fillna(0)
+        if not (hasattr(self,'features_da') or hasattr(self,'target_da')):
+            self.flatten()
+        self.features_da = self.features_da.dropna('time','all').fillna(0.)
+        self.target_da = self.target_da.dropna('time','all').fillna(0.)
+        
 
     def detrend(self):
         '''

@@ -7,13 +7,17 @@ def main():
 
     dataset = 'ERA5'
     vars = ['relative_humidity','geopotential','cape','cin']
-    years = ['1950-1978','1979-2022']
-    tot_years = '1950-2022'
+    years = ['1950-1978','1979-2019']
+    tot_years = '1950-2019'
 
     ds_list = []
     for y in years:
         filenames = ['{}/{}.{}.{}.nc'.format(data_dir,dataset,v,y) for v in vars]
-        merge_list = [xr.open_dataset(f).load() for f in filenames]
+        merge_list = []
+        for f in filenames:
+            ds = xr.open_dataset(f)
+            merge_list.append(ds)
+            ds.close()
         ds_list.append(xr.merge(merge_list))
     for i,ds in enumerate(ds_list):
         if 'expver' in ds.dims:
