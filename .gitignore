@@ -1,0 +1,4 @@
+.DS_Store
+__pycache__
+data/*.nc
+amazon_rainfall_model_old.ipynb
