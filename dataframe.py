@@ -5,9 +5,13 @@ import pandas as pd
 from eofs.xarray import Eof
 from typing import Union,Optional
 
+# Constants
+# ---------
+DATA_DIR = 'data/'
+
 class dataframe():
 
-    def __init__(self,data_dir:str,features_fname:str,target_fname:str,features_range:tuple=(-30,0,-80,-40,1950,2019),target_range:tuple=(-20,-5,-70,-50,1950,2019)):
+    def __init__(self,features_fname:str,target_fname:str,data_dir:str=DATA_DIR,features_range:tuple=(-30,0,-80,-40,1950,2019),target_range:tuple=(-20,-5,-70,-50,1950,2019)):
         '''
         Initialization of dataframe object
 

@@ -1,4 +1,5 @@
 import logging
+from turtle import color
 
 import numpy as np
 import pandas as pd
@@ -20,6 +21,9 @@ from eofs.xarray import Eof
 from abc import ABC, abstractmethod
 from copy import copy, deepcopy
 from typing import List,Tuple,Union,Optional, final
+
+# Constants
+FIG_DIR = 'Figures/'
 
 # Useful functions
 # ----------------
@@ -372,12 +376,14 @@ class DirectForecaster(ForecasterBase):
 
     def data_plots(
         self,
-        y_true:xr.Dataset,
-        y_pred:xr.Dataset,
+        y_true:Union[xr.DataArray,xr.Dataset],
+        y_pred:Union[xr.DataArray,xr.Dataset],
         plot_facet:bool=True,
         plot_timeseries:bool=False,
         plot_corr_map:bool=False,
         plot_error:bool=False,
+        individual:bool=True,
+        save_figs:bool=True,
         model_name:str=None,
         forecaster_name:str=None,
     ):
@@ -393,35 +399,61 @@ class DirectForecaster(ForecasterBase):
         `plot_error` : If true - plot the error
         `plot_corr_map` : If true - plot a correlation map of the region
         '''
-        plots = {}
 
+        if isinstance(y_true,xr.DataArray):
+            y_true = get_dataset(y_true)
+        if isinstance(y_pred,xr.DataArray):
+            y_pred = get_dataset(y_pred)
+        plots = {}
         if plot_facet:
+            # Get aspect ratio of grid
+            lon_range = y_true.lon.max() - y_true.lon.min()
+            lat_range = y_true.lat.max() - y_true.lat.min()
+            aspect = lon_range / lat_range
             bounds = np.linspace(-2,2,10)
             cmap = mpl.cm.RdBu
             norm = BoundaryNorm(bounds, cmap.N, extend='both')
             sm = ScalarMappable(norm=norm, cmap=cmap)
+            if individual:
+                # Plot individual variables using facetgrid
+                p_true = y_true.precip.plot(col='time',col_wrap=self.steps,vmin=-2,vmax=2,cmap=cmap,aspect=aspect,cbar_kwargs={'label':'precip standard anomaly','shrink':0.6})
+                p_true.map_dataarray(xr.plot.contour,x='lon',y='lat',levels=bounds,colors='k',add_colorbar=False)
+                if save_figs:
+                    plt.savefig(f'{FIG_DIR}facet_precip_true_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+                else:
+                    plots['facet_true']=(p_true.fig,p_true.axes)
+                p_pred = y_pred.precip.plot(col='time',col_wrap=self.steps,vmin=-2,vmax=2,cmap=cmap,aspect=aspect,cbar_kwargs={'label':'predicted precip standard anomaly','shrink':0.6})
+                p_pred.map_dataarray(xr.plot.contour,x='lon',y='lat',levels=bounds,colors='k',add_colorbar=False)
+                if save_figs:
+                    plt.savefig(f'{FIG_DIR}facet_precip_pred_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+                else:
+                    plots['facet_pred']=(p_pred.fig,p_true.axes)
+            else:
+                fig = plt.figure(constrained_layout=True,figsize=(int(aspect*3),3))
+                fig_true,fig_pred = fig.subfigures(1,2,width_ratios=[1,1.1])
 
-            fig = plt.figure(constrained_layout=True,figsize=(20,12))
-            fig_true,fig_pred = fig.subfigures(1,2,width_ratios=[1,1.1])
+                fig_true.suptitle('ground truth',fontsize='x-large')
+                fig_pred.suptitle('predicted',fontsize='x-large')
+                fig.suptitle('{} of precipitation using {}'.format(forecaster_name,model_name),fontsize='xx-large')
 
-            fig_true.suptitle('ground truth',fontsize='x-large')
-            fig_pred.suptitle('predicted',fontsize='x-large')
-            fig.suptitle('{} of precipitation using {}'.format(forecaster_name,model_name),fontsize='xx-large')
-            axs_true = fig_true.subplots(int(len(y_true.time)/self.steps),self.steps)
-            axs_pred = fig_pred.subplots(int(len(y_true.time)/self.steps),self.steps)
+                axs_true = fig_true.subplots(int(len(y_true.time)/self.steps),self.steps)
+                axs_pred = fig_pred.subplots(int(len(y_true.time)/self.steps),self.steps)
 
-            # Plot true values
-            for t,ax in enumerate(axs_true.flatten()):
-                y_true.precip.isel(time=t).plot.contourf(levels=bounds,ax=ax,cmap=cmap,add_colorbar=False)
-                y_true.precip.isel(time=t).plot.contour(levels=bounds,ax=ax,colors='k',add_colorbar=False)
-            # Plot predicted values
-            for t,ax in enumerate(axs_pred.flatten()):
-                y_pred.precip.isel(time=t).plot.contourf(levels=bounds,ax=ax,cmap=cmap,add_colorbar=False)
-                y_pred.precip.isel(time=t).plot.contour(levels=bounds,ax=ax,colors='k',add_colorbar=False)
+                # Plot true values
+                for t,ax in enumerate(axs_true.flatten()):
+                    y_true.precip.isel(time=t).plot(ax=ax,vmin=-2,vmax=2,cmap=cmap,add_colorbar=False)
+                    y_true.precip.isel(time=t).plot(ax=ax,vmin=-2,vmax=2,colors='k',add_colorbar=False)
+                # Plot predicted values
+                for t,ax in enumerate(axs_pred.flatten()):
+                    y_pred.precip.isel(time=t).plot(ax=ax,vmin=-2,vmax=2,cmap=cmap,add_colorbar=False)
+                    y_pred.precip.isel(time=t).plot(ax=ax,vmin=-2,vmax=2,colors='k',add_colorbar=False)
 
-            fig.colorbar(sm,ax=axs_pred,shrink=0.6)
-            return fig
-
+                fig.colorbar(sm,ax=axs_pred,shrink=0.6)
+                if save_figs:
+                    fig.save_fig(f'{FIG_DIR}facet_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+                else:
+                    return fig
+        return plots
 
     def eof_plots(
         self,
