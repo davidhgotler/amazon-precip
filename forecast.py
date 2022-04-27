@@ -15,9 +15,82 @@ from eofs.xarray import Eof
 
 from abc import ABC, abstractmethod
 from copy import copy
-from typing import List,Tuple,Union,Optional
+from typing import List,Tuple,Union,Optional, final
 
+# Useful functions
+# ----------------
+def sel_months(
+    X:Union[xr.DataArray,xr.Dataset],
+    months:Union[list,np.ndarray],
+):
+    return X.sel(time=X['time.month'].isin(months))
+def year2date(
+    yrs:Union[int,List[int],
+    np.ndarray],
+):
+    if isinstance(yrs,int):
+        return np.datetime64('{}'.format(yrs),'Y')
+    elif isinstance(yrs,np.ndarray) or isinstance(yrs,list):
+        yrs_list = [np.datetime64('{}'.format(y),'Y') for y in yrs]
+        return np.array(yrs_list)
+  
+def categorise_ndcoords(array, time_name):
+    """
+    Categorise all the non-dimension coordinates of an
+    `xarray.DataArray` into those that span only time, those that span
+    only space, and those that span both time and space.
 
+    Parameters
+    ----------
+    `array` : An `xarray.DataArray`.
+    `time_name` : Name of the time dimension coordinate in the input `array`.
+
+    Returns
+    -------
+    `time_coords` : A list of coordinates that span only the time dimension.
+    `space_coords` : A list of coordinates that span only the space dimensions.
+    `time_space_coords` : A list of coordinates that span both the time and space coordinates.
+
+    ref:
+    Dawson, A. (2016). eofs: A Library for EOF Analysis of Meteorological, Oceanographic, and Climate Data. Journal of Open Research Software, 4(1), e14. DOI: http://doi.org/10.5334/jors.122
+    """
+    ndcoords = [(name,coord) for name, coord in array.coords.items()
+                if name not in array.dims]
+    time_ndcoords = {}
+    space_ndcoords = {}
+    time_space_ndcoords = {}
+    for name,coord in ndcoords:
+        if coord.dims == (time_name,):
+            time_ndcoords[name] = coord
+        elif coord.dims:
+            if time_name in coord.dims:
+                time_space_ndcoords[name] = coord
+            else:
+                space_ndcoords[name] = coord
+    return dict(time_ndcoords=time_ndcoords,space_ndcoords=space_ndcoords,time_space_ndcoords=time_space_ndcoords)
+
+def get_dataset(
+    array:xr.DataArray
+)->xr.Dataset:
+    '''
+    Helper function to unstack a flattened data array to a dataset.
+
+    Parameters
+    ----------
+    `array` : Data Array containing variable(s) that have been stacked/flattened into (sample,feature)
+    '''
+    ft_dim = array.dims[1]
+    coords = categorise_ndcoords(array,array.dims[0])
+    feature_coord_names = list(coords['space_ndcoords'].keys())
+    # Check if the feature dimension is a multi-index
+    if not ft_dim in array.indexes.keys():
+        print('setting multi-index')
+        array = array.set_index({ft_dim:feature_coord_names})
+        print('dim now in index:{}'.format(ft_dim in array.indexes.keys()))
+    return array.unstack(ft_dim).to_dataset('variable')
+
+# Forecaster base class
+# ---------------------
 class ForecasterBase(ABC):
     @abstractmethod
     def train_test_split(
@@ -89,6 +162,8 @@ class ForecasterBase(ABC):
         '''
         pass
 
+# Direct forecaster class
+# -----------------------
 class DirectForecaster(ForecasterBase):
     '''
     Class for direct multioutput forecast prediction. N steps are predicted independently from L lags using autoregressive and/or exogeneous features.
@@ -166,27 +241,25 @@ class DirectForecaster(ForecasterBase):
             self.test_yrs = test_yrs
         
         # Select target months
-        y = self.sel_months(autoreg,self.target_months)
+        y = sel_months(autoreg,self.target_months)
 
         # Select feature months for direct prediction on a range of (1,12)
         feature_months = np.arange(self.target_months.min()-self.lags,self.target_months.max()-self.steps+1)
         feature_months = np.where(feature_months>0,feature_months,feature_months+12)
 
         if self.include_autoreg and self.include_exog:
-            X_autoreg = self.sel_months(autoreg,feature_months)
-            X_exog = self.sel_months(exog,feature_months)
+            X_autoreg = sel_months(autoreg,feature_months)
+            X_exog = sel_months(exog,feature_months)
             X = xr.concat([X_autoreg,X_exog],'feature',coords='all').rename('Features')
           
         elif self.include_autoreg:
-            X = self.sel_months(autoreg,feature_months)
+            X = sel_months(autoreg,feature_months)
         elif self.include_exog:
-            X = self.sel_months(exog,feature_months)
+            X = sel_months(exog,feature_months)
 
-        # Split into training and test sets
-        # ---------------------------------
-
-        # Check if January is a target month to include correct lag years in features
-        if np.isin(12,self.target_months):
+        # Check if some lag features should be from the previous year
+        # This is probably bugged or logically wrong but it won't be used
+        if self.target_months.min()-self.lags < 1:
             test_yrs_ft = np.concatenate(self.test_yrs,self.test_yrs.min()-1)
 
             X_train = X.drop_sel(time=X['time'][X['time.year'].isin(test_yrs_ft)])
@@ -228,16 +301,16 @@ class DirectForecaster(ForecasterBase):
         feature_months = np.where(feature_months>0,feature_months,feature_months+12)
 
         # Select target month and make sample index as the year
-        y_m = self.sel_months(y,m)
+        y_m = sel_months(y,m)
         # y_m = y_m.assign_coords({'sample':('time',y_m['time.year'].data)})
         # y_m = y_m.swap_dims(time='sample')
 
-        X_m = self.sel_months(X,feature_months)
+        X_m = sel_months(X,feature_months)
         if self.avg_lags:
             X_m = X_m.coarsen(time=len(feature_months)).mean()
         else:
             X_m = X_m.coarsen(time=len(feature_months)).construct(time=('sample','month'),keep_attrs=True)
-            X_m = X_m.assign_coords({'sample':self.year2date(X_m['time.year'][:,0].values),'month':X_m['time.month'][0,:].values})
+            X_m = X_m.assign_coords({'sample':year2date(X_m['time.year'][:,0].values),'month':X_m['time.month'][0,:].values})
             X_m = X_m.stack(lag_feature=X_m.dims[1:])
         if self.pca_features:
             if not self.fitted:
@@ -265,23 +338,9 @@ class DirectForecaster(ForecasterBase):
         for m,s in zip(self.target_months,steps_arr):
             X_m,y_m = self.get_training_matrix(m,s,X,y)
             y_pred_list.append(xr.DataArray(self.forecaster[m].predict(X_m),coords=y_m.coords))
-        y_pred = xr.concat(y_pred_list,'time',coords='all')
+        y_pred = xr.concat(y_pred_list,'time')
         # y_pred = y_pred.swap_dims(sample='time').sortby('time')
         return y_pred
-
-    def year2date(self,yrs:Union[int,List[int],np.ndarray]):
-        if isinstance(yrs,int):
-            return np.datetime64('{}'.format(yrs),'Y')
-        elif isinstance(yrs,np.ndarray) or isinstance(yrs,list):
-            yrs_list = [np.datetime64('{}'.format(y),'Y') for y in yrs]
-            return np.array(yrs_list)
-
-    def sel_months(
-        self,
-        X:Union[xr.DataArray,xr.Dataset],
-        months:Union[list,np.ndarray],
-    ):
-        return X.sel(time=X['time.month'].isin(months))
 
     def get_pcs(
         self,
@@ -310,8 +369,8 @@ class DirectForecaster(ForecasterBase):
 
     def data_plots(
         self,
-        y_true:xr.DataArray,
-        y_pred:xr.DataArray,
+        y_true:xr.Dataset,
+        y_pred:xr.Dataset,
         plot_facet:bool=True,
         plot_timeseries:bool=False,
         plot_corr_map:bool=False,
@@ -334,8 +393,7 @@ class DirectForecaster(ForecasterBase):
             p_true = y_true.hvplot(x='lon',y='lat',col='time').cols(self.steps)
             p_pred = y_pred.hvplot(x='lon',y='lat',col='time').cols(self.steps)
             plots['facet'] = p_true+p_pred
-        
-        
+        return plots
 
     def eof_plots(
         self,
@@ -354,4 +412,17 @@ class DirectForecaster(ForecasterBase):
 class RecursiveForecaster(ForecasterBase):
     def __init__(self) -> None:
         pass
+
+    def train_test_split(self, test_yrs: Union[int, List[int]], autoreg: xr.DataArray, exog: Union[xr.DataArray, xr.Dataset] = None) -> Tuple[xr.DataArray]:
+        return super().train_test_split(test_yrs, autoreg, exog)
+    
+    def get_training_matrix(self, m: int, s: int, X: xr.DataArray, y: xr.DataArray) -> Tuple[xr.DataArray]:
+        return super().get_training_matrix(m, s, X, y)
+    
+    def fit(self, X: xr.DataArray, y: xr.DataArray):
+        return super().fit(X, y)
+    
+    def predict(self, X: xr.DataArray, y: xr.DataArray) -> None:
+        return super().predict(X, y)
+
 
