@@ -12,7 +12,6 @@ from forecast import DirectForecaster,RecursiveForecaster
 from forecast import get_dataset
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
 
 def main():
     # directories
@@ -39,7 +38,7 @@ def main():
     y_true_ds = get_dataset(y_test)
     y_pred_ds = get_dataset(y_pred)
     plots = forecaster.data_plots(y_true_ds,y_pred_ds)
-    plots['facet']
+    plots.show()
 
 if __name__ == '__main__':
     main()

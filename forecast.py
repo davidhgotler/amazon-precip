@@ -3,9 +3,13 @@ import logging
 import numpy as np
 import pandas as pd
 import xarray as xr
+import hvplot as hv
 import hvplot.xarray
 
-from matplotlib import pyplot as plt
+import matplotlib as mpl
+from matplotlib import axes, pyplot as plt
+from matplotlib.colors import BoundaryNorm
+from matplotlib.cm import get_cmap,ScalarMappable
 
 import sklearn as skl
 from sklearn.decomposition import PCA
@@ -14,14 +18,14 @@ from sklearn.pipeline import Pipeline
 from eofs.xarray import Eof
 
 from abc import ABC, abstractmethod
-from copy import copy
+from copy import copy, deepcopy
 from typing import List,Tuple,Union,Optional, final
 
 # Useful functions
 # ----------------
 def sel_months(
     X:Union[xr.DataArray,xr.Dataset],
-    months:Union[list,np.ndarray],
+    months:Union[int,list[int],np.ndarray],
 ):
     return X.sel(time=X['time.month'].isin(months))
 def year2date(
@@ -84,9 +88,7 @@ def get_dataset(
     feature_coord_names = list(coords['space_ndcoords'].keys())
     # Check if the feature dimension is a multi-index
     if not ft_dim in array.indexes.keys():
-        print('setting multi-index')
         array = array.set_index({ft_dim:feature_coord_names})
-        print('dim now in index:{}'.format(ft_dim in array.indexes.keys()))
     return array.unstack(ft_dim).to_dataset('variable')
 
 # Forecaster base class
@@ -328,7 +330,7 @@ class DirectForecaster(ForecasterBase):
         forecaster = {}
         for m,s in zip(self.target_months,steps_arr):
             X_m,y_m = self.get_training_matrix(m,s,X,y)
-            forecaster[m] = self.regressor.fit(X_m,y_m)
+            forecaster[m] = deepcopy(self.regressor.fit(X_m,y_m))
         self.forecaster = forecaster
         self.fitted = True
 
@@ -339,6 +341,7 @@ class DirectForecaster(ForecasterBase):
             X_m,y_m = self.get_training_matrix(m,s,X,y)
             y_pred_list.append(xr.DataArray(self.forecaster[m].predict(X_m),coords=y_m.coords))
         y_pred = xr.concat(y_pred_list,'time')
+        y_pred = y_pred.sortby('time')
         # y_pred = y_pred.swap_dims(sample='time').sortby('time')
         return y_pred
 
@@ -375,6 +378,8 @@ class DirectForecaster(ForecasterBase):
         plot_timeseries:bool=False,
         plot_corr_map:bool=False,
         plot_error:bool=False,
+        model_name:str=None,
+        forecaster_name:str=None,
     ):
         '''
         Plotting function for comparing true field values to predicted
@@ -389,11 +394,34 @@ class DirectForecaster(ForecasterBase):
         `plot_corr_map` : If true - plot a correlation map of the region
         '''
         plots = {}
+
         if plot_facet:
-            p_true = y_true.hvplot(x='lon',y='lat',col='time').cols(self.steps)
-            p_pred = y_pred.hvplot(x='lon',y='lat',col='time').cols(self.steps)
-            plots['facet'] = p_true+p_pred
-        return plots
+            bounds = np.linspace(-2,2,10)
+            cmap = mpl.cm.RdBu
+            norm = BoundaryNorm(bounds, cmap.N, extend='both')
+            sm = ScalarMappable(norm=norm, cmap=cmap)
+
+            fig = plt.figure(constrained_layout=True,figsize=(20,12))
+            fig_true,fig_pred = fig.subfigures(1,2,width_ratios=[1,1.1])
+
+            fig_true.suptitle('ground truth',fontsize='x-large')
+            fig_pred.suptitle('predicted',fontsize='x-large')
+            fig.suptitle('{} of precipitation using {}'.format(forecaster_name,model_name),fontsize='xx-large')
+            axs_true = fig_true.subplots(int(len(y_true.time)/self.steps),self.steps)
+            axs_pred = fig_pred.subplots(int(len(y_true.time)/self.steps),self.steps)
+
+            # Plot true values
+            for t,ax in enumerate(axs_true.flatten()):
+                y_true.precip.isel(time=t).plot.contourf(levels=bounds,ax=ax,cmap=cmap,add_colorbar=False)
+                y_true.precip.isel(time=t).plot.contour(levels=bounds,ax=ax,colors='k',add_colorbar=False)
+            # Plot predicted values
+            for t,ax in enumerate(axs_pred.flatten()):
+                y_pred.precip.isel(time=t).plot.contourf(levels=bounds,ax=ax,cmap=cmap,add_colorbar=False)
+                y_pred.precip.isel(time=t).plot.contour(levels=bounds,ax=ax,colors='k',add_colorbar=False)
+
+            fig.colorbar(sm,ax=axs_pred,shrink=0.6)
+            return fig
+
 
     def eof_plots(
         self,
