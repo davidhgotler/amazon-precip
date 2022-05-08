@@ -1,10 +1,11 @@
+from cProfile import label
 import logging
-from turtle import color
 
 import numpy as np
 import pandas as pd
 import xarray as xr
-import hvplot as hv
+
+import holoviews as hv
 import hvplot.xarray
 
 import matplotlib as mpl
@@ -419,7 +420,7 @@ class DirectForecaster(ForecasterBase):
                 p_true = y_true.precip.plot(col='time',col_wrap=self.steps,vmin=-2,vmax=2,cmap=cmap,aspect=aspect,cbar_kwargs={'label':'precip standard anomaly','shrink':0.6})
                 p_true.map_dataarray(xr.plot.contour,x='lon',y='lat',levels=bounds,colors='k',add_colorbar=False)
                 if save_figs:
-                    plt.savefig(f'{FIG_DIR}facet_precip_true_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+                    plt.savefig(f'{FIG_DIR}facet_precip_true.png',facecolor='white',transparent=False)
                 else:
                     plots['facet_true']=(p_true.fig,p_true.axes)
                 p_pred = y_pred.precip.plot(col='time',col_wrap=self.steps,vmin=-2,vmax=2,cmap=cmap,aspect=aspect,cbar_kwargs={'label':'predicted precip standard anomaly','shrink':0.6})
@@ -453,6 +454,47 @@ class DirectForecaster(ForecasterBase):
                     fig.save_fig(f'{FIG_DIR}facet_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
                 else:
                     return fig
+        if plot_timeseries:
+            # Get cos(lat) weights
+            weights = np.cos(np.deg2rad(y_true.lat))
+
+            # Group by year for subplots
+            y_true_group = y_true.groupby('time.year')
+            y_pred_group = y_pred.groupby('time.year')
+
+            fig,axs = plt.subplots(2,2,figsize=(18,9))
+            for ax,(year,y_true_n),(_,y_pred_n) in zip(axs.flatten(),list(y_true_group),list(y_pred_group)):
+                # Calculate weighted mean
+                y_true_mean = y_true_n.precip.weighted(weights).mean(dim=['lat','lon']).to_series()
+                y_pred_mean = y_pred_n.precip.weighted(weights).mean(dim=['lat','lon']).to_series()
+                # Calculate weighted std for error bars
+                y_true_std = y_true_n.precip.std(dim=['lat','lon']).to_series()
+                y_pred_std = y_pred_n.precip.std(dim=['lat','lon']).to_series()
+                ax.errorbar(y_true_mean.index,y_true_mean,yerr=y_true_std,fmt='o',capsize=10,color='darkcyan',label='true')
+                ax.errorbar(y_pred_mean.index,y_pred_mean,yerr=y_pred_std,fmt='v',capsize=10,color='darkblue',label='predicted')
+
+                ax.set_ylim(-2,2)
+                ax.set_xticks(y_true_mean.index)
+                ax.set_xlabel('time')
+                ax.set_title(year,loc='left')
+                
+                # ax.legend(loc='upper right')
+                # ax.grid()
+
+            fig.suptitle('Weighted Mean Precipitation Standardized Anomaly on season: SON')
+            handles,labels = axs[0,0].get_legend_handles_labels()
+            fig.legend(handles,labels)
+
+            if save_figs:
+                plt.savefig(f'{FIG_DIR}timeseries_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+            else:
+                return fig,ax
+
+            # p_pred_agg = y_pred.precip.hvplot(x='time',aggregate=['lat','lon'])
+            # p_pred_mean = y_pred.precip.weighted(weights).mean(dim=['lat','lon']).hvplot(x='time')
+            # p_pred = p_pred_agg*p_pred_mean
+
+            # p_ts_pred = y_pred.precip.weighted(weights).mean(dim=['lat','lon']).plot()
         return plots
 
     def eof_plots(
