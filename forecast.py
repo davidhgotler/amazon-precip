@@ -412,7 +412,7 @@ class DirectForecaster(ForecasterBase):
             lat_range = y_true.lat.max() - y_true.lat.min()
             aspect = lon_range / lat_range
             bounds = np.linspace(-2,2,10)
-            cmap = mpl.cm.RdBu
+            cmap = mpl.cm.Spectral
             norm = BoundaryNorm(bounds, cmap.N, extend='both')
             sm = ScalarMappable(norm=norm, cmap=cmap)
             if individual:
@@ -462,7 +462,7 @@ class DirectForecaster(ForecasterBase):
             y_true_group = y_true.groupby('time.year')
             y_pred_group = y_pred.groupby('time.year')
 
-            fig,axs = plt.subplots(2,2,figsize=(18,9))
+            fig,axs = plt.subplots(2,2,figsize=(12,8))
             for ax,(year,y_true_n),(_,y_pred_n) in zip(axs.flatten(),list(y_true_group),list(y_pred_group)):
                 # Calculate weighted mean
                 y_true_mean = y_true_n.precip.weighted(weights).mean(dim=['lat','lon']).to_series()
@@ -472,10 +472,11 @@ class DirectForecaster(ForecasterBase):
                 y_pred_std = y_pred_n.precip.std(dim=['lat','lon']).to_series()
                 ax.errorbar(y_true_mean.index,y_true_mean,yerr=y_true_std,fmt='o',capsize=10,color='darkcyan',label='true')
                 ax.errorbar(y_pred_mean.index,y_pred_mean,yerr=y_pred_std,fmt='v',capsize=10,color='darkblue',label='predicted')
+                ax.axhline(y=0, color="black", linestyle="--",linewidth=0.6)
 
                 ax.set_ylim(-2,2)
                 ax.set_xticks(y_true_mean.index)
-                ax.set_xlabel('time')
+                ax.set_xticklabels(y_true_mean.index.month_name())
                 ax.set_title(year,loc='left')
                 
                 # ax.legend(loc='upper right')
