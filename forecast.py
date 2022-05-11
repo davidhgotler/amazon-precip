@@ -384,7 +384,6 @@ class DirectForecaster(ForecasterBase):
         plot_corr_map:bool=False,
         plot_error:bool=False,
         individual:bool=True,
-        save_figs:bool=True,
         model_name:str=None,
         forecaster_name:str=None,
     ):
@@ -405,12 +404,13 @@ class DirectForecaster(ForecasterBase):
             y_true = get_dataset(y_true)
         if isinstance(y_pred,xr.DataArray):
             y_pred = get_dataset(y_pred)
-        plots = {}
+
+        # Get aspect ratio of grid
+        lon_range = y_true.lon.max() - y_true.lon.min()
+        lat_range = y_true.lat.max() - y_true.lat.min()
+        aspect = lon_range / lat_range
+
         if plot_facet:
-            # Get aspect ratio of grid
-            lon_range = y_true.lon.max() - y_true.lon.min()
-            lat_range = y_true.lat.max() - y_true.lat.min()
-            aspect = lon_range / lat_range
             bounds = np.linspace(-2,2,10)
             cmap = mpl.cm.Spectral
             norm = BoundaryNorm(bounds, cmap.N, extend='both')
@@ -419,16 +419,11 @@ class DirectForecaster(ForecasterBase):
                 # Plot individual variables using facetgrid
                 p_true = y_true.precip.plot(col='time',col_wrap=self.steps,vmin=-2,vmax=2,cmap=cmap,aspect=aspect,cbar_kwargs={'label':'precip standard anomaly','shrink':0.6})
                 p_true.map_dataarray(xr.plot.contour,x='lon',y='lat',levels=bounds,colors='k',add_colorbar=False)
-                if save_figs:
-                    plt.savefig(f'{FIG_DIR}facet_precip_true.png',facecolor='white',transparent=False)
-                else:
-                    plots['facet_true']=(p_true.fig,p_true.axes)
+                plt.savefig(f'{FIG_DIR}facet_precip_true.png',facecolor='white',transparent=False)
+                
                 p_pred = y_pred.precip.plot(col='time',col_wrap=self.steps,vmin=-2,vmax=2,cmap=cmap,aspect=aspect,cbar_kwargs={'label':'predicted precip standard anomaly','shrink':0.6})
                 p_pred.map_dataarray(xr.plot.contour,x='lon',y='lat',levels=bounds,colors='k',add_colorbar=False)
-                if save_figs:
-                    plt.savefig(f'{FIG_DIR}facet_precip_pred_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
-                else:
-                    plots['facet_pred']=(p_pred.fig,p_true.axes)
+                plt.savefig(f'{FIG_DIR}facet_precip_pred_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
             else:
                 fig = plt.figure(constrained_layout=True,figsize=(int(aspect*3),3))
                 fig_true,fig_pred = fig.subfigures(1,2,width_ratios=[1,1.1])
@@ -450,10 +445,8 @@ class DirectForecaster(ForecasterBase):
                     y_pred.precip.isel(time=t).plot(ax=ax,vmin=-2,vmax=2,colors='k',add_colorbar=False)
 
                 fig.colorbar(sm,ax=axs_pred,shrink=0.6)
-                if save_figs:
-                    fig.save_fig(f'{FIG_DIR}facet_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
-                else:
-                    return fig
+                fig.save_fig(f'{FIG_DIR}facet_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+
         if plot_timeseries:
             # Get cos(lat) weights
             weights = np.cos(np.deg2rad(y_true.lat))
@@ -486,17 +479,28 @@ class DirectForecaster(ForecasterBase):
             handles,labels = axs[0,0].get_legend_handles_labels()
             fig.legend(handles,labels)
 
-            if save_figs:
-                plt.savefig(f'{FIG_DIR}timeseries_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
-            else:
-                return fig,ax
+            plt.savefig(f'{FIG_DIR}timeseries_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
 
-            # p_pred_agg = y_pred.precip.hvplot(x='time',aggregate=['lat','lon'])
-            # p_pred_mean = y_pred.precip.weighted(weights).mean(dim=['lat','lon']).hvplot(x='time')
-            # p_pred = p_pred_agg*p_pred_mean
 
-            # p_ts_pred = y_pred.precip.weighted(weights).mean(dim=['lat','lon']).plot()
-        return plots
+        if plot_corr_map:
+            # Group by month for subplots
+            y_true_group = y_true.groupby('time.month')
+            y_pred_group = y_pred.groupby('time.month')
+
+            corr_list = []
+            for (m,y_true_m),(_,y_pred_m) in zip(list(y_true_group),list(y_pred_group)):
+                y_true_arr = y_true_m.precip.values
+                y_pred_arr = y_pred_m.precip.values
+                shape = y_true_arr.shape
+                corr = np.corrcoef(y_true_arr.reshape(shape[0],-1),y_pred_arr.reshape(shape[0],-1),rowvar=False)
+                corr = corr[np.arange(shape[1]*shape[2]),np.arange(shape[1]*shape[2],2*shape[1]*shape[2])].reshape([shape[1],shape[2]])
+                corr = xr.DataArray(corr,coords=y_true_m.precip.mean(dim='time').coords,name='correlation')
+                corr = corr.assign_coords(month=m)
+                corr_list.append(corr)
+            corr = xr.concat(corr_list,'month')
+            corr_plot = corr.plot(x='lon',y='lat',col='month')
+            plt.savefig(f'{FIG_DIR}corr_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+            
 
     def eof_plots(
         self,
