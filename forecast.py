@@ -1,9 +1,10 @@
-from cProfile import label
 import logging
 
 import numpy as np
 import pandas as pd
 import xarray as xr
+
+import datetime
 
 import holoviews as hv
 import hvplot.xarray
@@ -469,7 +470,7 @@ class DirectForecaster(ForecasterBase):
 
                 ax.set_ylim(-2,2)
                 ax.set_xticks(y_true_mean.index)
-                ax.set_xticklabels(y_true_mean.index.month_name())
+                ax.set_xticklabels(y_true_mean.index.strftime('%b'))
                 ax.set_title(year,loc='left')
                 
                 # ax.legend(loc='upper right')
@@ -500,7 +501,30 @@ class DirectForecaster(ForecasterBase):
             corr = xr.concat(corr_list,'month')
             corr_plot = corr.plot(x='lon',y='lat',col='month')
             plt.savefig(f'{FIG_DIR}corr_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
-            
+        
+        if plot_error:
+            time = y_true.time.to_index()
+            years = time.strftime('%Y')
+            months = time.strftime('%b')
+            fig,axs = plt.subplots(int(len(y_true.time)/self.steps),self.steps,constrained_layout=True,figsize=(3*self.steps,3*int(len(y_true.time)/self.steps)),sharex=True,sharey=True)
+            for t,(ax,yr,m) in enumerate(zip(axs.flatten(),years,months)):
+                y_true_n = y_true.precip.isel(time=t).values.ravel()
+                y_pred_n = y_pred.precip.isel(time=t).values.ravel()
+                R_n = np.corrcoef(y_true_n,y_pred_n)[0,1]
+                ax.scatter(y_true_n,y_pred_n,s=1)
+                ax.axline([0,0],[1,1],linestyle='--',color='k')
+                ax.annotate('$R = {:.2f}$'.format(R_n),(0,2.5),size=14)
+
+                ax.set_xlim(-3,3)
+                ax.set_ylim(-3,3)
+                ax.set_title(f'{yr}',loc='left')
+                ax.set_title(f'{m}',loc='right')
+            for ax in axs[-1,:]:
+                ax.set_xlabel('y true')
+            for ax in axs[:,0]:
+                ax.set_ylabel('y pred')
+            plt.savefig(f'{FIG_DIR}error_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+
 
     def eof_plots(
         self,
