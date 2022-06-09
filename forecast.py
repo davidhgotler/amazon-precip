@@ -338,8 +338,7 @@ class DirectForecaster(ForecasterBase):
             test_yrs = autoreg['time.year'].values[-1]-np.arange(test_yrs)
             self.test_yrs = test_yrs
         else:
-            test_yrs = np.array(test_yrs)
-            self.test_yrs = test_yrs
+            self.test_yrs = np.array(test_yrs)
         
         # Select target months
         y = sel_months(autoreg,self.target_months)
@@ -378,8 +377,8 @@ class DirectForecaster(ForecasterBase):
     def get_training_matrix(
         self,
         m: int,
-        s: int, 
-        X: xr.Dataset, 
+        s: int,
+        X: xr.Dataset,
         y: xr.Dataset,
     ) -> Tuple[xr.DataArray]:
         '''
@@ -434,7 +433,7 @@ class DirectForecaster(ForecasterBase):
         self.fitted = True
 
     def predict(self, X: xr.DataArray, y: xr.DataArray) -> None:
-        steps_arr = np.arange(len(self.target_months))%self.steps
+        steps_arr = np.arange(len(self.target_months))%self.steps 
         y_pred_list = []
         for m,s in zip(self.target_months,steps_arr):
             X_m,y_m = self.get_training_matrix(m,s,X,y)
@@ -443,31 +442,6 @@ class DirectForecaster(ForecasterBase):
         y_pred = y_pred.sortby('time')
         # y_pred = y_pred.swap_dims(sample='time').sortby('time')
         return y_pred
-
-    def get_pcs(
-        self,
-        X:xr.DataArray,
-        n:int=10,
-        name:str='features_eofs',
-    ):
-        '''
-        Helper function to do eof analysis using eofs.xarray
-        '''
-        # Save eof object to access eof analysis data later
-        if not hasattr(self,'eofs'):
-            self.eofs = {name:Eof(X,np.sqrt(np.abs(np.cos(np.deg2rad(X.lat.values)))))}
-        else:
-            self.eofs[name] = Eof(X,np.sqrt(np.abs(np.cos(np.deg2rad(X.lat.values)))))
-        # Return reduced array with pc features
-        return self.eofs.pcs(pcscaling=1,npcs=n)
-    
-    def cross_validation(
-        self,
-        X:xr.DataArray,
-        y:xr.DataArray,
-        params:dict,
-    ):
-        pass
 
     def data_plots(
         self,
@@ -619,18 +593,6 @@ class DirectForecaster(ForecasterBase):
             plt.savefig(f'{FIG_DIR}error_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
 
 
-    def eof_plots(
-        self,
-        eofs:Eof,
-        n:int,
-        plot_var:bool=True,
-        plot_1st_pc:bool=True,
-        plot_1st_eof:bool=True,
-    ):
-        '''
-        Plot eof/pc analysis information
-        '''
-        
 
 
 class RecursiveForecaster(ForecasterBase):
