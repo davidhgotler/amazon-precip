@@ -1,28 +1,27 @@
-import logging
-
 import numpy as np
 import pandas as pd
 import xarray as xr
 
 import datetime
 
-import holoviews as hv
-import hvplot.xarray
-
 import matplotlib as mpl
-from matplotlib import axes, pyplot as plt
+from matplotlib import pyplot as plt
 from matplotlib.colors import BoundaryNorm
 from matplotlib.cm import get_cmap,ScalarMappable
 
 import sklearn as skl
 from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
+from sklearn.model_selection import ParameterGrid
+from sklearn.utils.validation import check_is_fitted
 
 from eofs.xarray import Eof
 
+import inspect
+from collections import defaultdict
 from abc import ABC, abstractmethod
 from copy import copy, deepcopy
-from typing import List,Tuple,Union,Optional, final
+from typing import List,Tuple,Type,Union,Optional
 
 # Constants
 FIG_DIR = 'Figures/'
@@ -100,6 +99,101 @@ def get_dataset(
 # Forecaster base class
 # ---------------------
 class ForecasterBase(ABC):
+
+    @classmethod
+    def _get_param_names(cls):
+        """Get parameter names for the estimator"""
+        # fetch the constructor or the original constructor before
+        # deprecation wrapping if any
+        init = getattr(cls.__init__, "deprecated_original", cls.__init__)
+        if init is object.__init__:
+            # No explicit constructor to introspect
+            return []
+
+        # introspect the constructor arguments to find the model parameters
+        # to represent
+        init_signature = inspect.signature(init)
+        # Consider the constructor parameters excluding 'self'
+        parameters = [
+            p
+            for p in init_signature.parameters.values()
+            if p.name != "self" and p.kind != p.VAR_KEYWORD
+        ]
+        for p in parameters:
+            if p.kind == p.VAR_POSITIONAL:
+                raise RuntimeError(
+                    "scikit-learn estimators should always "
+                    "specify their parameters in the signature"
+                    " of their __init__ (no varargs)."
+                    " %s with constructor %s doesn't "
+                    " follow this convention." % (cls, init_signature)
+                )
+        # Extract and sort argument names excluding 'self'
+        return sorted([p.name for p in parameters])
+    
+    def get_params(self, deep=True):
+        """
+        Get parameters for this estimator.
+        Parameters
+        ----------
+        deep : bool, default=True
+            If True, will return the parameters for this estimator and
+            contained subobjects that are estimators.
+        Returns
+        -------
+        params : dict
+            Parameter names mapped to their values.
+        """
+        out = dict()
+        for key in self._get_param_names():
+            value = getattr(self, key)
+            if deep and hasattr(value, "get_params"):
+                deep_items = value.get_params().items()
+                out.update((key + "__" + k, val) for k, val in deep_items)
+            out[key] = value
+        return out
+    
+    def set_params(self, **params):
+        """Set the parameters of this estimator.
+        The method works on simple estimators as well as on nested objects
+        (such as :class:`~sklearn.pipeline.Pipeline`). The latter have
+        parameters of the form ``<component>__<parameter>`` so that it's
+        possible to update each component of a nested object.
+        Parameters
+        ----------
+        **params : dict
+            Estimator parameters.
+        Returns
+        -------
+        self : estimator instance
+            Estimator instance.
+        """
+        if not params:
+            # Simple optimization to gain speed (inspect is slow)
+            return self
+        valid_params = self.get_params(deep=True)
+
+        nested_params = defaultdict(dict)  # grouped by prefix
+        for key, value in params.items():
+            key, delim, sub_key = key.partition("__")
+            if key not in valid_params:
+                local_valid_params = self._get_param_names()
+                raise ValueError(
+                    f"Invalid parameter {key!r} for estimator {self}. "
+                    f"Valid parameters are: {local_valid_params!r}."
+                )
+
+            if delim:
+                nested_params[key][sub_key] = value
+            else:
+                setattr(self, key, value)
+                valid_params[key] = value
+
+        for key, sub_params in nested_params.items():
+            valid_params[key].set_params(**sub_params)
+
+        return self
+
     @abstractmethod
     def train_test_split(
         self,
@@ -186,7 +280,6 @@ class DirectForecaster(ForecasterBase):
         include_exog:bool=True,
         avg_lags:bool=True,
         pca_features:bool=True,
-        pca_target:bool=False,
     ):
         '''
         Parameters
@@ -557,3 +650,30 @@ class RecursiveForecaster(ForecasterBase):
         return super().predict(X, y)
 
 
+class grid_search_cv():
+    '''
+    Cross validation function for forecasters
+    '''
+    def __init__(self,
+        forecaster,
+        param_grid,
+        *,
+        scoring=None,
+        n_jobs=None,
+        refit=True,
+        cv=None,
+        error_score=np.nan,
+        return_train_score=False,
+    ):
+        self.forecaster=forecaster
+        self.param_grid=param_grid
+        self.scoring=scoring
+        self.n_jobs=n_jobs
+        self.refit=refit
+        self.cv=cv
+        self.error_score=error_score
+        self.return_train_score=return_train_score
+        
+    def score(self,X,y=None):
+        pass
+        
