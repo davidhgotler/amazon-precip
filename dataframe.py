@@ -6,7 +6,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 
 from eofs.xarray import Eof
-from typing import Union,Optional
+from typing import Iterable, Tuple, Union,Optional
 
 from logging import exception, warning
 # Constants
@@ -44,14 +44,16 @@ class dataframe():
         self.predictors_ds = self.sel_range(predictors_ds,predictors_range)
         self.predictand_ds = self.sel_range(predictand_ds,predictand_range)
 
-    def sel_range(self,ds:xr.Dataset,range:tuple)->xr.Dataset:
+    def sel_range(self,ds:xr.Dataset,range:Tuple[int],months:Iterable[int],coarsen:tuple)->xr.Dataset:
         '''
         Helper function to select coordinate ranges and reformat coordinates
         '''
         # Unwrap the coordinate ranges
         lat_min,lat_max,lon_min,lon_max,yr_min,yr_max=range
+        dt,dlat,dlon = coarsen
         # Select years
         ds = ds.sel(time=np.logical_and(ds['time.year'] >= yr_min,ds['time.year']<=yr_max))
+        ds = ds.sel(time=ds['time.month'] in months)
         # Reformat latitude and longitude
         lon_attrs = ds.lon.attrs
         ds['lon'] = xr.where(ds['lon']<180,ds['lon'],ds['lon']-360)
@@ -59,6 +61,7 @@ class dataframe():
         ds = ds.sortby(['lat','lon','time'])
         # Select lat,lon ranges
         ds = ds.sel(lat=slice(lat_min,lat_max),lon=slice(lon_min,lon_max))
+        ds = ds.coarsen(time=dt,lat=dlat,lon=dlon)
         return ds
     
     def flatten(self):
@@ -155,16 +158,16 @@ class dataframe():
         # For meof use the stacked array
         if method=='meof':
             # Perform meof analysis on stacked arrays grouped by month
-            
-            self.eofs = {
-                'predictors_eofs':Eof(self.predictors_da,np.sqrt(np.abs(np.cos(np.deg2rad(self.predictors_da.lat.values))))),
-                'predictand_eofs':Eof(self.predictand_da,np.sqrt(np.abs(np.cos(np.deg2rad(self.predictand_da.lat.values))))),
-            }
+            for m,data in dict(self.predictors_da.groupby('time.month')):
+                self.eofs = {
+                    'predictors_eofs':Eof(self.predictors_da,np.sqrt(np.abs(np.cos(np.deg2rad(self.predictors_da.lat.values))))),
+                    'predictand_eofs':Eof(self.predictand_da,np.sqrt(np.abs(np.cos(np.deg2rad(self.predictand_da.lat.values))))),
+                }
             # Get pcs and return
             predictors_pcs = self.eofs['predictors_eofs'].pcs(pcscaling=1,npcs=n)
             predictand_pcs = self.eofs['predictand_eofs'].pcs(pcscaling=1,npcs=n)
             return predictors_pcs,predictand_pcs
-        elif method=='variables':
+        if method=='variables':
 
 
         # Save eof object to access eof analysis data later
