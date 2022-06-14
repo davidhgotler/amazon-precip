@@ -146,8 +146,7 @@ class dataframe():
         # Select years
         ds = ds.sel(time=np.logical_and(ds['time.year'] >= yr_min,ds['time.year']<=yr_max))
         ds = ds.sel(time=ds['time.month'].isin(months))
-        if dt>1:
-            ds=ds.coarsen(time=dt).mean()
+
         # Reformat lat,lon
         lon_attrs = ds.lon.attrs
         ds['lon'] = xr.where(ds['lon']<180,ds['lon'],ds['lon']-360)
@@ -162,6 +161,9 @@ class dataframe():
         ds = ds.groupby_bins('lat',lat_bins,labels=lat_center).mean(dim='lat')
         ds = ds.groupby_bins('lon',lon_bins,labels=lon_center).mean(dim='lon')
         ds = ds.rename(lat_bins='lat',lon_bins='lon')
+        if dt>1:
+            ds=ds.coarsen(time=dt).mean()
+
         return ds
     
     def flatten(self):
