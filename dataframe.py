@@ -1,5 +1,3 @@
-
-from cProfile import label
 import xarray as xr
 import numpy as np
 import pandas as pd
@@ -93,7 +91,6 @@ def get_dataset(
         array = array.set_index({ft_dim:predictors_coord_names})
     return array.unstack(ft_dim).to_dataset('variable')
 
-
 class dataframe():
 
     def __init__(
@@ -151,7 +148,7 @@ class dataframe():
         lon_attrs = ds.lon.attrs
         ds['lon'] = xr.where(ds['lon']<180,ds['lon'],ds['lon']-360)
         ds.lon.attrs = lon_attrs
-        ds = ds.sortby(['lat','lon','time'])
+        ds = ds.sortby(['lat','lon','time'])    
         # coarsen predictors
         lat_bins = np.arange(lat_min-dlat/2,lat_max+dlat,dlat)
         lon_bins = np.arange(lon_min-dlon/2,lon_max+dlon,dlon)
@@ -270,9 +267,25 @@ class dataframe():
             return X_pcs
         elif method=='varimax':
             return X_rot_pcs
-
-    def plot_eofs(self,pcs,eofs,variance,title='PCA'):
-        fig,axs=plt.subplots()
+    def eof_plots(
+        self,
+        n:int,
+        plot_var:bool=True,
+        plot_1st_pc:bool=True,
+        plot_1st_eof:bool=True,
+    ):
+        '''
+        Plot eof/pc analysis information
+        '''
+        if not hasattr(self,'eofs'):
+            self.eofs = {'predictors_eofs':Eof(self.predictors_da,np.sqrt(np.abs(np.cos(np.deg2rad(self.predictors_da.lat.values)))))}
+            self.eofs['predictand_eofs'] = Eof(self.predictand_da,np.sqrt(np.abs(np.cos(np.deg2rad(self.predictand_da.lat.values)))))
+        if plot_var:
+            eofs_variance = {name.removesuffix('_eofs')+'_var':eofs['predictors_eofs'].varianceFraction(neigs=n) for name,eofs in self.eofs.items()}
+            fig,axs = plt.subplots(len(eofs_variance),2,figsize=(12,6*len(eofs_variance)),constrained_layout=True)
+            for ax,(name,variance) in zip(axs,eofs_variance.items()):
+                variance.plot(ax=ax[0])
+                variance.cumsum().plot(ax=ax[1])
 
     class climatology():
         '''
