@@ -36,7 +36,6 @@ def get_corr_map(y_true_group,y_pred_group):
         # Calculate total correlation for that month
         corr_m = np.corrcoef(y_true_arr.ravel(),y_pred_arr.ravel())[0,1]
         corr_m_list.append(corr_m)
-
     return xr.concat(corr_list,'month'),np.array(corr_m_list)
 
 def get_MSE_map(y_true_group,y_pred_group):
@@ -189,7 +188,7 @@ def main():
     steps=3
 
     # Coarsen data according to
-    predictors_coarsen = lags,2.5,2.5
+    predictors_coarsen = lags,.5,.5
     predictand_coarsen = 1,1,1
 
     # Create dataframe object to store our feature and predictand datasets
@@ -208,7 +207,8 @@ def main():
     data.std_anom()
     data.flatten()
     data.remove_nan()
-    X = data.get_pcs(data.predictors_da,n=40,method='varimax')
+    # X = data.predictors_da
+    X = data.get_pcs(data.predictors_da,n=None,method='varimax')
 
     forecaster = DirectForecaster(
         Ridge(alpha=1),
@@ -223,7 +223,7 @@ def main():
 
     for param_grid in [
         {'reg':[LinearRegression()]},
-        {'reg':[Ridge()],'reg__alpha':np.logspace(-4,1,7)},
+        {'reg':[Ridge()],'reg__alpha':np.logspace(-4,2,6)},
         {'reg':[Lasso()],'reg__alpha':np.logspace(-4,0,5)}
     ]:
         model=param_grid['reg'][0].__class__.__name__
