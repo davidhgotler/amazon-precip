@@ -677,7 +677,8 @@ class kfold_grid_search():
         param_grid = list(ParameterGrid(self.param_grid))
 
         # Parallel loop through all parameters
-        out = [self._evaluate(params,X,y) for params in param_grid]
+        with Parallel(n_jobs=self.n_jobs) as parallel:
+            out = parallel(delayed(self._evaluate)(params,X,y) for params in param_grid)
         results = pd.DataFrame(out)
         if self.metric.endswith('error'):
             self.best_fit_results = results.loc[results[self.metric].idxmin()]
@@ -686,6 +687,7 @@ class kfold_grid_search():
         else:
             warn("couldn't tell if metric should be ascending or descending",category='BAD CODING')
         self.best_estimator = self.best_fit_results['frc']
+        print(self.best_estimator.get_params())
         self.results = results
         if self.refit:
             self.best_estimator.fit(X,y)

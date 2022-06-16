@@ -188,7 +188,7 @@ def main():
     steps=3
 
     # Coarsen data according to
-    predictors_coarsen = lags,.5,.5
+    predictors_coarsen = lags,2.5,2.5
     predictand_coarsen = 1,1,1
 
     # Create dataframe object to store our feature and predictand datasets
@@ -207,8 +207,9 @@ def main():
     data.std_anom()
     data.flatten()
     data.remove_nan()
-    # X = data.predictors_da
-    X = data.get_pcs(data.predictors_da,n=None,method='varimax')
+    X = data.predictors_da
+    y = data.predictand_da
+    # X = data.get_pcs(data.predictors_da,n=None,method='varimax')
 
     forecaster = DirectForecaster(
         Ridge(alpha=1),
@@ -219,20 +220,40 @@ def main():
         include_predictors=True,
     )
 
-    X_train,y_train,X_test,y_test = forecaster.train_test_split(X,data.predictand_da,[2009,2010,2011])
+    X_train,y_train,X_test,y_test = forecaster.train_test_split(X,y,[2009,2010,2011])
+
+    # Cross-validation
+    # max length of val. training set is # train. yr.s - # val. yrs. per k-fold
+    n_val_yrs = 3
+    k = 12
+    n_max = len(X_train)-3
 
     for param_grid in [
-        {'reg':[LinearRegression()]},
-        {'reg':[Ridge()],'reg__alpha':np.logspace(-4,2,6)},
-        {'reg':[Lasso()],'reg__alpha':np.logspace(-4,0,5)}
+        {
+            'reg':[Pipeline([('fa',FA(rotation='varimax',max_iter=10000)),('linreg',LinearRegression(fit_intercept=False))])],
+            'reg__fa__n_components':np.arange(0,n_max,5)+1,
+        },
+        {
+            'reg':[Pipeline([('fa',FA(rotation='varimax',max_iter=10000)),('ridge',Ridge(fit_intercept=False))],verbose=True)],
+            'reg__fa__n_components':np.arange(0,n_max,5)+1,
+            'reg__ridge__alpha':np.logspace(-4,1,6),
+        },
+        {
+            'reg':[Pipeline([('fa',FA(rotation='varimax',max_iter=10000)),('lasso',Lasso(fit_intercept=False))],verbose=True)],
+            'reg__fa__n_components':np.arange(0,n_max,5)+1,
+            'reg__ridge__alpha':np.logspace(-4,1,6),
+        },
     ]:
-        model=param_grid['reg'][0].__class__.__name__
+
+        model=param_grid['reg'][0]._final_estimator.__class__.__name__
+
+        print(f'\nrunning cross-validation on cv on {model}\n')
 
         kfold = kfold_grid_search(
             frc=forecaster,
             param_grid=param_grid,
             scoring=[mean_squared_error,f1_score,r2_score],
-            metric='f1_score',
+            metric='mean_squared_error',
             n_jobs=-1,
         )
 
