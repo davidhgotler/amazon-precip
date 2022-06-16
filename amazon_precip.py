@@ -1,8 +1,6 @@
-from calendar import month
-import enum
-from operator import imod
 import numpy as np
 from sklearn import multioutput
+from sklearn import linear_model
 import xarray as xr
 
 from matplotlib import pyplot as plt
@@ -10,7 +8,7 @@ from matplotlib import pyplot as plt
 from sklearn.linear_model import Lasso, LinearRegression, Ridge
 from sklearn.neural_network import MLPRegressor
 from sklearn.decomposition import PCA,FactorAnalysis as FA
-from sklearn.metrics import mean_absolute_error,mean_squared_error
+from sklearn.metrics import mean_absolute_error,mean_squared_error, r2_score
 
 import datetime
     
@@ -19,20 +17,31 @@ from forecast import *
 
 def get_corr_map(y_true_group,y_pred_group):
     corr_list = []
+    corr_m_list = []
     # Calculate correlation at each gridpoint
     for (m,y_true_m),(_,y_pred_m) in zip(list(y_true_group),list(y_pred_group)):
+        # Get arrays
         y_true_arr = y_true_m.precip.values
         y_pred_arr = y_pred_m.precip.values
+        # Save shape
         shape = y_true_arr.shape
+        # Calculate correlation map for each month
         corr = np.corrcoef(y_true_arr.reshape(shape[0],-1),y_pred_arr.reshape(shape[0],-1),rowvar=False)
         corr = corr[np.arange(shape[1]*shape[2]),np.arange(shape[1]*shape[2],2*shape[1]*shape[2])].reshape([shape[1],shape[2]])
+        
         corr = xr.DataArray(corr,coords=y_true_m.precip.mean(dim='time').coords,name='correlation')
         corr = corr.assign_coords(month=datetime.datetime.strptime(f'{m}', "%m").strftime("%b"))
         corr_list.append(corr)
-    return xr.concat(corr_list,'month')
+
+        # Calculate total correlation for that month
+        corr_m = np.corrcoef(y_true_arr.ravel(),y_pred_arr.ravel())[0,1]
+        corr_m_list.append(corr_m)
+
+    return xr.concat(corr_list,'month'),np.array(corr_m_list)
 
 def get_MSE_map(y_true_group,y_pred_group):
     MSE_list = []
+    MSE_m_list = []
     # Calculate correlation at each gridpoint
     for (m,y_true_m),(_,y_pred_m) in zip(list(y_true_group),list(y_pred_group)):
         y_true_arr = y_true_m.precip.values
@@ -47,55 +56,113 @@ def get_MSE_map(y_true_group,y_pred_group):
         MSE = xr.DataArray(MSE,coords=y_true_m.precip.mean(dim='time').coords,name='mean_squared_error')
         MSE = MSE.assign_coords(month=datetime.datetime.strptime(f'{m}', "%m").strftime("%b"))
         MSE_list.append(MSE)
-    return xr.concat(MSE_list,dim='month')
 
-def get_F1_map(y_true_group,y_pred_group):
-    F1_list = []
-    # Calculate correlation at each gridpoint
+        MSE_m = mean_squared_error(y_true_arr.reshape(shape[0],-1),y_pred_arr.reshape(shape[0],-1))
+        MSE_m_list.append(MSE_m)
+
+    return xr.concat(MSE_list,dim='month'),np.array(MSE_m_list)
+
+def get_f1_map(y_true_group,y_pred_group):
+    f1_list = []
+    f1_m_list = []
+    # Calculate f score at each gridpoint
     for (m,y_true_m),(_,y_pred_m) in zip(list(y_true_group),list(y_pred_group)):
+        # y_true_arr = y_true_m.precip.values
+        # y_pred_arr = y_pred_m.precip.values
         y_true_arr = (y_true_m.precip.values>0).astype(int)
         y_pred_arr = (y_pred_m.precip.values>0).astype(int)
         shape = y_true_arr.shape
         with Parallel(n_jobs=-1) as parallel:
-            F1 = parallel( delayed(f1_score)(y_true_arr[:,i,j],y_pred_arr[:,i,j])
+            f1 = parallel( delayed(f1_score)(y_true_arr[:,i,j],y_pred_arr[:,i,j])
                 for i in np.arange(shape[1])
                 for j in np.arange(shape[2])
             )
-        F1 = np.array(F1).reshape(shape[1],shape[2])
-        F1 = xr.DataArray(F1,coords=y_true_m.precip.mean(dim='time').coords,name='balanced_f_score')
-        F1 = F1.assign_coords(month=datetime.datetime.strptime(f'{m}', "%m").strftime("%b"))
-        F1_list.append(F1)
-    return xr.concat(F1_list,dim='month')
+        f1 = np.array(f1).reshape(shape[1],shape[2])
+        f1 = xr.DataArray(f1,coords=y_true_m.precip.mean(dim='time').coords,name='balanced_f_score')
+        f1 = f1.assign_coords(month=datetime.datetime.strptime(f'{m}', "%m").strftime("%b"))
+        f1_list.append(f1)
 
-def spatial_plots(y_true,y_pred,dataset='val',model='ridge',reg=1):
+        # Calculate f score for entire month
+        f1_m = f1_score(y_true_arr.reshape(shape[0],-1),y_pred_arr.reshape(shape[0],-1),average='samples')
+        f1_m_list.append(f1_m)
+    return xr.concat(f1_list,dim='month'),np.array(f1_m_list)
+
+def get_r2_map(y_true_group,y_pred_group):
+    r2_list = []
+    r2_m_list = []
+    # Calculate r2 at each gridpoint
+    for (m,y_true_m),(_,y_pred_m) in zip(list(y_true_group),list(y_pred_group)):
+        y_true_arr = y_true_m.precip.values
+        y_pred_arr = y_pred_m.precip.values
+
+        shape = y_true_arr.shape
+        with Parallel(n_jobs=-1) as parallel:
+            r2 = parallel( delayed(r2_score)(y_true_arr[:,i,j],y_pred_arr[:,i,j])
+                for i in np.arange(shape[1])
+                for j in np.arange(shape[2])
+            )
+        r2 = np.array(r2).reshape(shape[1],shape[2])
+        r2 = xr.DataArray(r2,coords=y_true_m.precip.mean(dim='time').coords,name='coef_of_determination')
+        r2 = r2.assign_coords(month=datetime.datetime.strptime(f'{m}', "%m").strftime("%b"))
+        r2_list.append(r2)
+
+        # Calculate r2 score for entire month
+        r2_m = r2_score(y_true_arr.reshape(shape[0],-1),y_pred_arr.reshape(shape[0],-1))
+        r2_m_list.append(r2_m)
+    return xr.concat(r2_list,dim='month'),np.array(r2_m_list)
+
+def validation_plots(y_true,y_pred,dataset='val',model='ridge',alpha=1,results=None,best_results=None):
+
     # Group by month
     y_true_group = y_true.groupby('time.month')
     y_pred_group = y_pred.groupby('time.month')
-    corr = get_corr_map(y_true_group,y_pred_group)
-    MSE = get_MSE_map(y_true_group,y_pred_group)
-    F1 = get_F1_map(y_true_group,y_pred_group)
-    fig = plt.figure(constrained_layout=True,figsize=(12,12))
-    fig_corr,fig_MSE,fig_f1 = fig.subfigures(3,1)
-    axs_corr = fig_corr.subplots(1,3)
-    for i,ax in enumerate(axs_corr):
+    # Plot spatial maps
+    aspect = (y_true.lat.max() - y_true.lat.min())/(y_true.lon.max() - y_true.lon.min())
+    # Get correlation
+    corr_sp,corr_m = get_corr_map(y_true_group,y_pred_group)
+    MSE_sp,MSE_m = get_MSE_map(y_true_group,y_pred_group)
+    f1_sp,f1_m = get_f1_map(y_true_group,y_pred_group)
+    r2_sp,r2_m = get_r2_map(y_true_group,y_pred_group)
+    fig = plt.figure(constrained_layout=True,figsize=(12,int(12*aspect)))
+    fig_corr,fig_MSE,fig_f1,fig_r2 = fig.subfigures(4,1)
+    axs_corr = fig_corr.subplots(1,4)
+    
+    axs_corr[0].plot(corr_sp.month,corr_m,'o-')
+    for i,ax in enumerate(axs_corr[1:]):
         if i<2:
-            corr.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='seismic',vmin=-1,vmax=1,add_colorbar=False)
+            corr_sp.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='seismic',vmin=-1,vmax=1,add_colorbar=False)
         else:
-            corr.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='seismic',vmin=-1,vmax=1)
-    axs_MSE = fig_MSE.subplots(1,3)
-    for i,ax in enumerate(axs_MSE):
+            corr_sp.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='seismic',vmin=-1,vmax=1)
+        
+    axs_MSE = fig_MSE.subplots(1,4)
+    axs_MSE[0].plot(MSE_sp.month,MSE_m,'o-')
+    for i,ax in enumerate(axs_MSE[1:]):
         if i<2:
-            MSE.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='seismic',vmin=0,vmax=2,add_colorbar=False)
+            MSE_sp.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='bone',vmin=0,vmax=2,add_colorbar=False)
         else:
-            MSE.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='seismic',vmin=0,vmax=2)
-    axs_f1 = fig_f1.subplots(1,3)
-    for i,ax in enumerate(axs_f1):
+            MSE_sp.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='bone',vmin=0,vmax=2)
+    
+    axs_f1 = fig_f1.subplots(1,4)
+    axs_f1[0].plot(f1_sp.month,f1_m,'o-')
+    for i,ax in enumerate(axs_f1[1:]):
         if i<2:
-            F1.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='binary_r',vmin=0,vmax=1,add_colorbar=False)
+            f1_sp.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='bone',vmin=0,vmax=2,add_colorbar=False)
         else:
-            F1.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='binary_r',vmin=0,vmax=1)
+            f1_sp.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='bone',vmin=0,vmax=2)
 
-    plt.savefig(f'{FIG_DIR}/{dataset}_{model}_{reg}.png')
+    axs_r2 = fig_r2.subplots(1,4)
+    axs_r2[0].plot(r2_sp.month,r2_m,'o-')
+    for i,ax in enumerate(axs_r2[1:]):
+        if i<2:
+            r2_sp.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='seismic',vmin=-1,vmax=1,add_colorbar=False)
+        else:
+            r2_sp.isel(month=i).plot(x='lon',y='lat',ax=ax,cmap='seismic',vmin=-1,vmax=1)
+
+    if alpha is None:
+        plt.savefig(f'{FIG_DIR}/{dataset}_{model}.png')
+    else:
+        plt.savefig(f'{FIG_DIR}/{dataset}_{model}_{alpha}.png')
+
 
 def main():
     # directories
@@ -141,7 +208,7 @@ def main():
     data.std_anom()
     data.flatten()
     data.remove_nan()
-    X = data.get_pcs(data.predictors_da,n=20,method='varimax')
+    X = data.get_pcs(data.predictors_da,n=40,method='varimax')
 
     forecaster = DirectForecaster(
         Ridge(alpha=1),
@@ -154,21 +221,60 @@ def main():
 
     X_train,y_train,X_test,y_test = forecaster.train_test_split(X,data.predictand_da,[2009,2010,2011])
 
-    for model,param_grid in {'ridge':{'reg':[Ridge()],'reg__alpha':np.arange(0,1000)},'lasso':{'reg':[Lasso()],'reg__alpha':np.arange(0,1,.001)}}.items():
-        forecaster.set_params(reg=param_grid['reg'][0])
-        frc = kfold_grid_search(
+    for param_grid in [
+        {'reg':[LinearRegression()]},
+        {'reg':[Ridge()],'reg__alpha':np.logspace(-4,1,7)},
+        {'reg':[Lasso()],'reg__alpha':np.logspace(-4,0,5)}
+    ]:
+        model=param_grid['reg'][0].__class__.__name__
+
+        kfold = kfold_grid_search(
             frc=forecaster,
             param_grid=param_grid,
-            scoring=f1_score,
-            n_jobs=-1
+            scoring=[mean_squared_error,f1_score,r2_score],
+            metric='f1_score',
+            n_jobs=-1,
         )
-        y_val,y_val_pred = frc.cv_predict(X_train,y_train)
-        y_val_ds = get_dataset(y_val)
-        y_val_pred_ds = get_dataset(y_val_pred)
 
-        spatial_plots(y_val_ds,y_val_pred_ds,dataset='val',model=model,reg=frc.best_fit_results['reg__alpha'])
+        kfold.fit(X_train,y_train)
+        print(kfold.results.drop(columns='frc'))
+        y_val,y_val_pred = kfold.fit_predict(kfold.best_estimator,X_train,y_train)
+        y_val = get_dataset(y_val)
+        y_val_pred = get_dataset(y_val_pred)
 
-    
+        if 'reg__alpha' in param_grid:
+            validation_plots(
+                y_val,
+                y_val_pred,
+                dataset='val',
+                model=model,
+                alpha=kfold.best_fit_results['reg__alpha'],
+                results=kfold.results,
+                best_results=kfold.best_fit_results,
+            )
+        else:
+            validation_plots(
+                y_val,
+                y_val_pred,
+                dataset='val',
+                model=model,
+                alpha=None,
+                results=kfold.results,
+                best_results=kfold.best_fit_results,
+            )
+        
+        # kfold.best_estimator.data_plots(y_val,
+        # y_val_pred,
+        # plot_facet=True,
+        # plot_true=True,
+        # plot_timeseries=False,
+        # plot_val=False,
+        # model_name=model,
+        # forecaster_name='direct',
+        # set_name='val',
+        # )
+
+        
     # forecaster.fit(X_train,y_train)
 
     # y_pred = forecaster.predict(X_test)

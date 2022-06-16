@@ -1,8 +1,9 @@
+from lib2to3.refactor import get_all_fix_names
 from pkgutil import get_data
 from unittest import result
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, f1_score, mean_absolute_error,mean_squared_error, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, mean_absolute_error,mean_squared_error, precision_score, r2_score, recall_score
 from sklearn.preprocessing import StandardScaler
 import xarray as xr
 
@@ -23,7 +24,7 @@ from sklearn.model_selection import ParameterGrid
 
 
 from logging import exception
-import inspect
+from inspect import isfunction,signature
 from collections import defaultdict
 from abc import ABC, abstractmethod
 from copy import copy, deepcopy
@@ -47,7 +48,7 @@ class ForecasterBase(ABC):
 
         # introspect the constructor arguments to find the model parameters
         # to represent
-        init_signature = inspect.signature(init)
+        init_signature = signature(init)
         # Consider the constructor parameters excluding 'self'
         parameters = [
             p
@@ -459,18 +460,18 @@ class DirectForecaster(ForecasterBase):
                 # Plot individual variables using facetgrid
                 p_true = y_true.precip.plot(x='lon',y='lat',col='time',col_wrap=self.steps,vmin=vmin,vmax=vmax,cmap=cmap,aspect=aspect,cbar_kwargs={'label':'precip standard anomaly','shrink':0.5})
                 p_true.map_dataarray(xr.plot.contour,x='lon',y='lat',levels=bounds,colors='k',add_colorbar=False)
-                plt.savefig(f'{FIG_DIR}facet_precip_true.png',facecolor='white',transparent=False)
+                plt.savefig(f'{FIG_DIR}facet_precip_true_{set_name}.png',facecolor='white',transparent=False)
                 plots['facet_true']=p_true
             p_pred = y_pred.precip.plot(x='lon',y='lat',col='time',col_wrap=self.steps,vmin=vmin,vmax=vmax,cmap=cmap,aspect=aspect,cbar_kwargs={'label':'predicted precip standard anomaly','shrink':0.6})
             p_pred.map_dataarray(xr.plot.contour,x='lon',y='lat',levels=bounds,colors='k',add_colorbar=False)
-            plt.savefig(f'{FIG_DIR}facet_precip_pred_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+            plt.savefig(f'{FIG_DIR}facet_precip_pred_{set_name}_{model_name}.png',facecolor='white',transparent=False)
             # elif not plot_individual:
             #     fig = plt.figure(constrained_layout=True,figsize=(int(aspect*3),3))
             #     fig_true,fig_pred = fig.subfigures(1,2,width_ratios=[1,1.1])
 
             #     fig_true.suptitle('ground truth',fontsize='x-large')
             #     fig_pred.suptitle('predicted',fontsize='x-large')
-            #     fig.suptitle('{} of precipitation using {}'.format(forecaster_name,model_name),fontsize='xx-large')
+            #     fig.suptitle('{} of precipitation using {}'.format(set_name,model_name),fontsize='xx-large')
 
             #     axs_true = fig_true.subplots(int(len(y_true.time)/self.steps),self.steps)
             #     axs_pred = fig_pred.subplots(int(len(y_true.time)/self.steps),self.steps)
@@ -485,7 +486,7 @@ class DirectForecaster(ForecasterBase):
             #         y_pred.precip.isel(time=t).plot.contour(ax=ax,vmin=-2,vmax=2,colors='k',add_colorbar=False)
 
             #     fig.colorbar(sm,ax=axs_pred,shrink=0.6)
-            #     fig.save_fig(f'{FIG_DIR}facet_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+            #     fig.save_fig(f'{FIG_DIR}facet_precip_{set_name}_{model_name}.png',facecolor='white',transparent=False)
             plots['facet_pred']=p_pred
         if plot_timeseries:
             # Get cos(lat) weights
@@ -519,7 +520,7 @@ class DirectForecaster(ForecasterBase):
             handles,labels = axs[0,0].get_legend_handles_labels()
             fig.legend(handles,labels)
 
-            plt.savefig(f'{FIG_DIR}timeseries_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+            plt.savefig(f'{FIG_DIR}timeseries_precip_{set_name}_{model_name}.png',facecolor='white',transparent=False)
 
 
         if plot_val:
@@ -539,7 +540,7 @@ class DirectForecaster(ForecasterBase):
                 corr_list.append(corr)
             corr = xr.concat(corr_list,'month')
             corr_plot = corr.plot(x='lon',y='lat',col='month')
-            plt.savefig(f'{FIG_DIR}corr_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+            plt.savefig(f'{FIG_DIR}corr_precip_{set_name}_{model_name}.png',facecolor='white',transparent=False)
         
             time = y_true.time.to_index()
             years = time.strftime('%Y')
@@ -563,7 +564,7 @@ class DirectForecaster(ForecasterBase):
                 ax.set_xlabel('y true')
             for ax in axs[:,0]:
                 ax.set_ylabel('y pred')
-            plt.savefig(f'{FIG_DIR}error_precip_{forecaster_name}_{model_name}.png',facecolor='white',transparent=False)
+            plt.savefig(f'{FIG_DIR}error_precip_{set_name}_{model_name}.png',facecolor='white',transparent=False)
         return plots
 
 class RecursiveForecaster(ForecasterBase):
@@ -593,6 +594,7 @@ class kfold_grid_search():
         k=12,
         n_yrs=3,
         scoring=None,
+        metric=None,
         n_jobs=None,
         refit=True,
         error_score=np.nan,
@@ -603,6 +605,7 @@ class kfold_grid_search():
         self.k=k
         self.n_yrs=n_yrs
         self.scoring=scoring
+        self.metric=metric
         self.n_jobs=n_jobs
         self.refit=refit
         self.error_score=error_score
@@ -611,51 +614,93 @@ class kfold_grid_search():
     def get_cv(self,yrs):
         cv_size = self.k*self.n_yrs
         val_yrs = yrs[-cv_size:]
-        return list(zip(val_yrs[::self.n_yrs],val_yrs[self.n_yrs-1::self.n_yrs]+1)),val_yrs
+        self._val_yrs = val_yrs
 
-    def _fit_predict(self,frc,X,y,val_yrs):
-        X_train,y_train,X_val,_ = frc.train_test_split(X,y,np.arange(val_yrs[0],val_yrs[1]))
+        cv = [
+            np.arange(yr_start,yr_end)
+            for yr_start,yr_end in zip(val_yrs[::self.n_yrs],val_yrs[self.n_yrs-1::self.n_yrs]+1)
+        ]
+        return cv
+        
+
+    def _fit_predict(self,frc,X_train,y_train,X_val):
+        if frc.fitted:
+            frc.reset()
         frc.fit(X_train,y_train)
         return frc.predict(X_val)
 
-    def evaluate(self,frc,fit_params,X,y,cv,val_yrs):
-        X_train,y_train,X_val,y_val = self.frc.train_test_split(X,y,val_yrs)
-        y_pred_list = [self._fit_predict(frc.set_params(**fit_params),X,y,val_yrs) for val_yrs in cv]
-        y_pred = xr.concat(y_pred_list,dim='time')
-        if self.scoring in [precision_score,accuracy_score,recall_score,f1_score]:
-            y_val_bi = (y_val>0).astype(int)
-            y_pred_bi = (y_pred>0).astype(int)
-            score = self.scoring(y_val_bi,y_pred_bi,average='samples')
-        else:
-            score = self.scoring(y_val,y_pred)
-        result = fit_params|{'score':score,'frc':frc}
-        return result
+    def fit_predict(self,frc,X,y):
+        # Get validation set
+        _,_,_,y_val = frc.train_test_split(X,y,self._val_yrs)
+
+        # Fit and predict on the validation set
+        y_pred = [self._fit_predict(frc,X_train,y_train,X_val)
+                for X_train,y_train,X_val,_ in [frc.train_test_split(X,y,yrs)
+                    for yrs in self._cv
+                ]
+        ]
+        y_pred = xr.concat(y_pred,dim='time')
+        return y_val,y_pred
+
+    def _score(self,y_val,y_pred):
+        def get_label(metric):
+            return metric.__name__
+        def get_binary(X,dec_func=0):
+            return (X>dec_func).astype(int)
+        if len(self.scoring)>1:
+            metrics = [get_label(metric) for metric in self.scoring]
+            score = {}
+            for metric,scorer in zip(metrics,self.scoring):
+                if scorer in [precision_score,accuracy_score,recall_score,f1_score]:
+                    score[metric]=scorer(get_binary(y_val),get_binary(y_pred),average='samples')
+                else:
+                    score[metric]=scorer(y_val,y_pred)
+        elif type(self.scoring)==list and len(self.scoring)==1:
+            metric = get_label(self.scoring[0])
+            scorer = self.scoring[0]
+            if scorer in [precision_score,accuracy_score,recall_score,f1_score]:
+                score={metric:scorer(get_binary(y_val),get_binary(y_pred))}
+            else:
+                score={metric:scorer(y_val,y_pred)}
+        elif isfunction(self.scoring):
+            metric=get_label(self.scoring)
+            if self.scoring in [precision_score,accuracy_score,recall_score,f1_score]:
+                score={metric:self.scoring(get_binary(y_val),get_binary(y_pred))}
+            else:
+                score={metric:self.scoring(y_val,y_pred)}
+        return score
 
     def fit(self,X,y):
-        self.frc.reset()
-        cv,val_yrs = self.get_cv(X['time.year'].values)
+        # Get cv and validation years
+        self._cv = self.get_cv(X['time.year'].values)
+        # Get parameter grid (all permutations)
         param_grid = list(ParameterGrid(self.param_grid))
-        with Parallel(n_jobs=self.n_jobs) as parallel:
-            out = parallel(delayed(self.evaluate)(copy(self.frc),params,X,y,cv,val_yrs)
-                for params in param_grid
-            )
-            results = pd.DataFrame(out)
-            if self.scoring in [mean_absolute_error, mean_squared_error]:
-                results = results.sort_values('score',ascending=True)
-            elif self.scoring in [precision_score,accuracy_score,recall_score,f1_score]:
-                results = results.sort_values('score',ascending=False)
-            self.best_fit_results = results.iloc[0].to_dict()
-            self.best_estimator = self.best_fit_results['frc']
-            self.results = results.to_dict(orient='list')
-    
-    def cv_predict(self,X,y):
-        self.fit(X,y)
-        frc = self.best_estimator
-        cv,val_yrs = self.get_cv(X['time.year'].values)
-        X_train,y_train,X_val,y_val = frc.train_test_split(X,y,val_yrs)
-        with Parallel(n_jobs=self.n_jobs) as parallel:
-            y_pred_list = parallel(delayed(self._fit_predict)(frc,X,y,yrs) for yrs in cv)
-            y_pred = xr.concat(y_pred_list,dim='time')
-        return y_val,y_pred
+
+        # Parallel loop through all parameters
+        out = [self._evaluate(params,X,y) for params in param_grid]
+        results = pd.DataFrame(out)
+        if self.metric.endswith('error'):
+            self.best_fit_results = results.loc[results[self.metric].idxmin()]
+        elif self.metric in ['precision_score','accuracy_score','recall_score','f1_score','r2_score']:
+            self.best_fit_results = results.loc[results[self.metric].idxmax()]
+        else:
+            warn("couldn't tell if metric should be ascending or descending",category='BAD CODING')
+        self.best_estimator = self.best_fit_results['frc']
+        self.results = results
+        if self.refit:
+            self.best_estimator.fit(X,y)
+
+    def _evaluate(self,fit_params,X,y):
+        # Set parameters
+        frc = deepcopy(self.frc)
+        frc.reset()
+        frc.set_params(**fit_params)
+        # Fit and predict on the validation set
+        y_val,y_pred = self.fit_predict(frc,X,y)
+
+        # Score model
+        score = self._score(y_val,y_pred)
+        result = deepcopy(fit_params)|score|{'frc':frc}
+        return result
 
         

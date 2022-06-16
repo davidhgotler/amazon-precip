@@ -259,14 +259,13 @@ class dataframe():
 
         X_tot_var = ((X_eofs**2).sum()/tot_var).values
         X_rot_tot_var = ((X_rot_eofs**2).sum()/tot_var).values
-        print('Total variance explained by {} eof modes: {:.3f}'.format(n,X_tot_var))
-        print('Total variance explained by {} rotated eof modes: {:.3f}'.format(n,X_rot_tot_var))
-        self.plot_eofs(X_pcs,X_eofs,X_var,title='PCA')
-        self.plot_eofs(X_rot_pcs,X_rot_eofs,X_rot_var)
+        # self.plot_eofs(X_pcs,X_eofs,X_var,title='PCA')
+        # self.plot_eofs(X_rot_pcs,X_rot_eofs,X_rot_var)
         if method=='PCA':
             return X_pcs
         elif method=='varimax':
             return X_rot_pcs
+
     def eof_plots(
         self,
         n:int,
